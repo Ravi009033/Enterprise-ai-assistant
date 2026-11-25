@@ -89,12 +89,35 @@ if question:
 
             try:
 
+                conversation_history = [
+                    {
+                        "role": message["role"],
+                        "content": message["content"]
+                    }
+                    for message in st.session_state.messages[:-1]
+                ][-10:]
+
                 result = send_message(
                     question=question,
-                    session_id=st.session_state.session_id
+                    session_id=st.session_state.session_id,
+                    history=conversation_history
                 )
 
                 answer = result["answer"]
+
+                sources = result.get("sources", [])
+
+                if sources:
+                    source_text = "\n\n**Sources:**\n"
+
+                    for source in sources:
+                        source_text += (
+                            f"- [{source['label']}] "
+                            f"- {source['filename']} "
+                            f"(Page {source['page']})\n"
+                        )
+
+                    answer += source_text
 
                 st.markdown(answer)
 
