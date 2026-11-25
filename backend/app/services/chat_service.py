@@ -17,7 +17,8 @@ def process_chat(
         "context": "",
         "answer": "",
         "sources": [],
-        "status": "processing"
+        "status": "processing",
+        "employee_id": "EMP001",
     }
 
     # Execute the LangGraph workflow

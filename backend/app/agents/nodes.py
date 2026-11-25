@@ -2,6 +2,7 @@
 from backend.app.core.llm import get_llm
 from backend.app.rag.query_rewriter import rewrite_query
 from backend.app.rag.retrieval import retrieve_relevant_documents
+from backend.app.services.employee_service import get_leave_balance
 
 
 
@@ -200,11 +201,35 @@ Question:
 
 
 def tool_node(state: dict) -> dict:
-    return {
-        "answer": (
-            "This request requires an enterprise system integration. "
-            "The required tool is not configured yet."
-        ),
-        "sources": [],
-        "status": "tool_not_configured"
-    }
+    employee_id = state.get("employee_id")
+
+    if not employee_id:
+        return {
+            "answer": "Employee identity is not configured.",
+            "sources": [],
+            "status": "identity_not_configured",
+        }
+
+    try:
+        leave_data = get_leave_balance(employee_id)
+
+        answer = (
+            f"Hello {leave_data['employee_name']}! "
+            f"Here is your leave balance:\n"
+            f"- Total leaves: {leave_data['total_leaves']}\n"
+            f"- Used leaves: {leave_data['used_leaves']}\n"
+            f"- Remaining leaves: {leave_data['remaining_leaves']}"
+        )
+
+        return {
+            "answer": answer,
+            "sources": [],
+            "status": "success",
+        }
+
+    except ValueError:
+        return {
+            "answer": "Unable to find your employee record.",
+            "sources": [],
+            "status": "employee_not_found",
+        }
