@@ -1,0 +1,21 @@
+
+# Backend
+fastapi
+uvicorn[standard]
+python-multipart
+pydantic
+pydantic-settings
+python-dotenv
+httpx
+
+# Frontend
+streamlit
+requests
+
+# WebSocket
+websockets
+
+# Testing
+pytest
+
+langchain-google-genai
