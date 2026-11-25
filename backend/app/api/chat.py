@@ -1,3 +1,4 @@
+
 from fastapi import APIRouter, HTTPException
 
 from backend.app.schemas.chat import ChatRequest, ChatResponse
@@ -23,7 +24,6 @@ def chat(request: ChatRequest):
         return result
 
     except Exception as error:
-
         print("CHAT API ERROR:", repr(error))
 
         raise HTTPException(
