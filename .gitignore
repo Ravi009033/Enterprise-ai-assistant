@@ -65,3 +65,7 @@ backend/data/documents/*
 # ==============================
 .DS_Store
 Thumbs.db
+
+
+backend/chroma_db/
+backend/data/documents/

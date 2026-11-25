@@ -1,12 +1,23 @@
+from backend.app.core.llm import get_llm
+
 
 def process_chat(question: str, session_id: str):
 
-    # Temporary response for testing
-    answer = (
-        f"You asked: {question}. "
-        "I am your Enterprise AI Assistant. "
-        "Gemini integration will be added next."
-    )
+    llm = get_llm()
+
+    response = llm.invoke(question)
+
+    answer = response.content
+
+    if isinstance(answer, list):
+        answer = "\n".join(
+            item.get("text", "")
+            for item in answer
+            if isinstance(item, dict) and item.get("type") == "text"
+        )
+
+    if not isinstance(answer, str) or not answer.strip():
+        raise RuntimeError("Gemini returned an empty response")
 
     return {
         "answer": answer,

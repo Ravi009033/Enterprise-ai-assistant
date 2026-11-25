@@ -19,7 +19,7 @@ router = APIRouter(
     "/chat",
     response_model=ChatResponse
 )
-async def chat(request: ChatRequest):
+def chat(request: ChatRequest):
 
     try:
 
