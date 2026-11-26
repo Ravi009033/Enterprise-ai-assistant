@@ -5,18 +5,22 @@ from backend.app.agents.graph import assistant_graph
 def process_chat(
     question: str,
     session_id: str,
-    history: list[dict] | None = None
+    history: list[dict] | None = None,
+    employee_id: str = "",
+    user_id: int = 0,
 ) -> dict:
 
+    # Scope the conversation to the authenticated user.
+    # This prevents different users from sharing LangGraph state.
+    scoped_session_id = f"user:{user_id}:session:{session_id}"
 
-    # Create the LangGraph session configuration.
     config = {
         "configurable": {
-            "thread_id": session_id
+            "thread_id": scoped_session_id
         }
     }
 
-    # Retrieve the previous conversation state.
+    # Retrieve previous conversation state.
     previous_state = assistant_graph.get_state(config).values
 
     # Restore any pending leave request.
@@ -36,7 +40,7 @@ def process_chat(
 
     initial_state = {
         "question": question,
-        "session_id": session_id,
+        "session_id": scoped_session_id,
         "history": history or [],
         "route": "",
         "rewritten_question": "",
@@ -44,18 +48,19 @@ def process_chat(
         "answer": "",
         "sources": [],
         "status": "processing",
-        "employee_id": "EMP001",
+        "employee_id": employee_id,
         "tool_action": "",
         "pending_leave": pending_leave,
         "confirmation": confirmation,
     }
 
-    # Execute the LangGraph workflow
+    # Execute LangGraph workflow.
     result = assistant_graph.invoke(
         initial_state,
         config=config
     )
 
+    print("Authenticated employee:", employee_id)
     print("Final route:", result["route"])
     print("Final status:", result["status"])
 

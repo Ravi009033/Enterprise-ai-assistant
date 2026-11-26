@@ -1,6 +1,7 @@
 
 from backend.app.db.database import Base, engine, SessionLocal
 from backend.app.models.employee import Employee
+from backend.app.models.password_reset import PasswordResetToken
 
 
 def seed_employees():
