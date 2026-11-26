@@ -4,6 +4,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
 
     google_api_key: str
+    deepgram_api_key: str
 
     gemini_model: str = "gemini-3.8-flash"
 

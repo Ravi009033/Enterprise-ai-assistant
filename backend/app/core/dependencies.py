@@ -12,14 +12,11 @@ oauth2_scheme = OAuth2PasswordBearer(
 )
 
 
-def get_current_user(
-    token: str = Depends(oauth2_scheme),
-):
+def get_user_from_token(token: str):
 
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Invalid or expired authentication token",
-        headers={"WWW-Authenticate": "Bearer"},
     )
 
     payload = decode_access_token(token)
@@ -48,11 +45,7 @@ def get_current_user(
         token_version = payload.get("token_version")
 
         if token_version != user.token_version:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Token has been revoked. Please log in again.",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
+            raise credentials_exception
 
         return {
             "user_id": user.id,
@@ -63,6 +56,12 @@ def get_current_user(
 
     finally:
         db.close()
+        
+
+def get_current_user(
+    token: str = Depends(oauth2_scheme),
+):
+    return get_user_from_token(token)
 
 
 def require_roles(*allowed_roles):

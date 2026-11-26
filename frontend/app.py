@@ -1,12 +1,15 @@
 
 import streamlit as st
 import uuid
+import streamlit.components.v1 as components
 
 from api_client import (
     login_user,
     logout_user,
     get_current_user,
     send_message,
+    transcribe_audio,
+    generate_speech,
 )
 
 
@@ -37,6 +40,208 @@ if "session_id" not in st.session_state:
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
+
+
+
+def render_live_voice_component(access_token):
+
+    websocket_url = (
+        "ws://127.0.0.1:8000/ws/voice"
+        f"?token={access_token}"
+    )
+
+    html_code = f"""
+    <div style="font-family: sans-serif; padding: 10px;">
+        <h3>🎙️ Live Voice Assistant</h3>
+
+        <button id="startBtn">Start Live Recording</button>
+        <button id="stopBtn" disabled>Stop Recording</button>
+
+        <p id="status">Disconnected</p>
+        <div id="transcription"></div>
+        <h4>🤖 AI Assistant Response</h4>
+        <div id="aiResponse"
+           style = "
+                white-space: pre-wrap;
+                padding: 18px;
+                background: #f0f2f6;
+                border-radius: 10px;
+                font-size: 18px;
+                line-height: 1.7;
+                min-height: 160px;
+                color: #1f2937;
+                overflow-wrap: anywhere;
+                margin-top: 12px;
+            ">
+        </div>
+    </div>
+
+    <script>
+    const wsUrl = "{websocket_url}";
+
+    const startBtn = document.getElementById("startBtn");
+    const stopBtn = document.getElementById("stopBtn");
+    const status = document.getElementById("status");
+    const transcription = document.getElementById("transcription");
+    const aiResponse = document.getElementById("aiResponse");
+
+    let socket = null;
+    let audioContext = null;
+    let mediaStream = null;
+    let processor = null;
+    let source = null;
+
+    startBtn.onclick = async () => {{
+
+        try {{
+
+            status.textContent = "Connecting...";
+
+            socket = new WebSocket(wsUrl);
+
+            socket.onopen = async () => {{
+
+                try {{
+
+                    mediaStream = await navigator.mediaDevices.getUserMedia({{
+                        audio: {{
+                            channelCount: 1,
+                            echoCancellation: true,
+                            noiseSuppression: true
+                        }}
+                    }});
+
+                    audioContext = new AudioContext({{
+                        sampleRate: 16000
+                    }});
+
+                    source = audioContext.createMediaStreamSource(mediaStream);
+
+                    processor = audioContext.createScriptProcessor(
+                        4096, 1, 1
+                    );
+
+                    source.connect(processor);
+                    processor.connect(audioContext.destination);
+
+                    processor.onaudioprocess = (event) => {{
+
+                        if (socket.readyState !== WebSocket.OPEN) return;
+
+                        const input = event.inputBuffer.getChannelData(0);
+                        const pcm16 = new Int16Array(input.length);
+
+                        for (let i = 0; i < input.length; i++) {{
+
+                            const sample = Math.max(-1, Math.min(1, input[i]));
+
+                            pcm16[i] = sample < 0
+                                ? sample * 32768
+                                : sample * 32767;
+                        }}
+
+                        socket.send(pcm16.buffer);
+                    }};
+
+                    status.textContent = "🔴 Recording and streaming audio...";
+                    startBtn.disabled = true;
+                    stopBtn.disabled = false;
+
+                }} catch (error) {{
+
+                    status.textContent = "Microphone error: " + error.message;
+
+                    socket.close();
+                }}
+            }};
+
+            socket.onmessage = (event) => {{
+
+                const data = JSON.parse(event.data);
+
+                if (data.type === "connection") {{
+                    status.textContent = "Authenticated connection established.";
+                }}
+
+                if (data.type === "transcription_ready") {{
+                    status.textContent = "🔴 Deepgram ready. Speak now!";
+                }}
+
+                if (data.type === "transcription") {{
+                    transcription.textContent += data.transcript + " ";
+                }}
+                if (data.type === "thinking") {{
+                    aiResponse.textContent = "⏳ " + data.message;
+                }}
+
+                if (data.type === "ai_response") {{
+                    aiResponse.textContent = data.answer;
+                }}
+
+                if (data.type === "error") {{
+                    aiResponse.textContent = "❌ " + data.message;
+                }}
+
+                if (data.type === "stream_stopped") {{
+                    status.textContent = "Recording stopped.";
+                }}
+            }};
+
+            socket.onerror = () => {{
+                console.error("WebSocket error:", event);
+                status.textContent = "WebSocket connection error.";
+            }};
+
+            socket.onclose = (event) => {{
+
+                status.textContent =
+                    "Disconnected. Code: " + event.code +
+                    " Reason: " + (event.reason || "No reason provided");
+
+                console.log("WebSocket closed:", event.code, event.reason);
+
+                startBtn.disabled = false;
+                stopBtn.disabled = true;
+            }};
+        }} catch (error) {{
+
+            status.textContent = "Error: " + error.message;
+        }}
+    }};
+
+    stopBtn.onclick = () => {{
+
+        if (processor) {{
+            processor.disconnect();
+            processor = null;
+        }}
+
+        if (source) {{
+            source.disconnect();
+            source = null;
+        }}
+
+        if (mediaStream) {{
+            mediaStream.getTracks().forEach(track => track.stop());
+            mediaStream = null;
+        }}
+
+        if (audioContext) {{
+            audioContext.close();
+            audioContext = null;
+        }}
+
+        if (socket && socket.readyState === WebSocket.OPEN) {{
+            socket.send("stop");
+        }}
+
+        stopBtn.disabled = true;
+    }};
+    </script>
+    """
+
+    components.html(html_code, height=450)
+
 
 
 # LOGIN SCREEN
@@ -102,6 +307,13 @@ st.caption(
     "Your intelligent enterprise chatbot "
     "powered by Generative AI."
 )
+st.divider()
+
+render_live_voice_component(
+    st.session_state.access_token
+)
+
+st.divider()
 
 
 # Sidebar
@@ -112,6 +324,16 @@ with st.sidebar:
     st.write(f"Logged in as: **{st.session_state.username}**")
     st.write(f"Role: {st.session_state.role}")
     st.write(f"Employee ID: {st.session_state.employee_id}")
+
+    st.divider()
+
+    st.subheader("Voice Settings")
+
+    st.checkbox(
+        "Enable Voice Response",
+        value=True,
+        key="voice_response_enabled"
+    )
 
     if st.button("Logout"):
 
@@ -153,79 +375,132 @@ with st.sidebar:
 
 
 # Display previous messages
+
 for message in st.session_state.messages:
 
     with st.chat_message(message["role"]):
 
         st.markdown(message["content"])
 
+        if message.get("audio"):
+            st.audio(
+                message["audio"],
+                format="audio/mpeg"
+            )
+
 
 # User input
-question = st.chat_input(
-    "Ask your question here..."
+
+# Unified Text + Voice Chat Input
+prompt = st.chat_input(
+    "Ask a question or record your voice...",
+    accept_audio=True,
+    audio_sample_rate=16000,
 )
 
+# Process text or voice message
+if prompt:
 
-# Process user question
-if question:
+    question = prompt.text.strip()
 
-    st.session_state.messages.append({
-        "role": "user",
-        "content": question
-    })
+    try:
 
-    with st.chat_message("user"):
+        # Convert voice to text if audio is recorded
+        if prompt.audio is not None:
 
-        st.markdown(question)
+            with st.spinner("Converting speech to text..."):
 
-    with st.chat_message("assistant"):
+                audio_bytes = prompt.audio.getvalue()
 
-        with st.spinner("Processing your question..."):
-
-            try:
-
-                conversation_history = [
-                    {
-                        "role": message["role"],
-                        "content": message["content"]
-                    }
-                    for message in st.session_state.messages[:-1]
-                ][-10:]
-
-                result = send_message(
-                    question=question,
-                    session_id=st.session_state.session_id,
-                    access_token=st.session_state.access_token,
-                    history=conversation_history
+                transcription = transcribe_audio(
+                    audio_bytes,
+                    st.session_state.access_token
                 )
 
-                answer = result["answer"]
+                transcript = transcription["transcript"].strip()
 
-                sources = result.get("sources", [])
+            if not question:
+                question = transcript
+            elif transcript:
+                question = question + "\n" + transcript
 
-                if sources:
+        if question:
 
-                    source_text = "\n\n**Sources:**\n"
+            st.session_state.messages.append({
+                "role": "user",
+                "content": question
+            })
 
-                    for source in sources:
+            with st.chat_message("user"):
+                st.markdown(question)
 
-                        source_text += (
-                            f"- [{source['label']}] "
-                            f"- {source['filename']} "
-                            f"(Page {source['page']})\n"
+            with st.chat_message("assistant"):
+
+                with st.spinner("Processing your question..."):
+
+                    conversation_history = [
+                        {
+                            "role": message["role"],
+                            "content": message["content"]
+                        }
+                        for message in st.session_state.messages[:-1]
+                    ][-10:]
+
+                    result = send_message(
+                        question=question,
+                        session_id=st.session_state.session_id,
+                        access_token=st.session_state.access_token,
+                        history=conversation_history
+                    )
+
+                    answer = result["answer"]
+
+                    sources = result.get("sources", [])
+
+                    if sources:
+
+                        source_text = "\n\n**Sources:**\n"
+
+                        for source in sources:
+
+                            source_text += (
+                                f"- [{source['label']}] "
+                                f"- {source['filename']} "
+                                f"(Page {source['page']})\n"
+                            )
+
+                        answer += source_text
+
+                    
+            st.markdown(answer)
+
+            audio_bytes = None
+            if st.session_state.get("voice_response_enabled", True):
+                try:
+
+                    with st.spinner("Generating voice response..."):
+
+                        audio_bytes = generate_speech(
+                            answer,
+                            st.session_state.access_token
                         )
 
-                    answer += source_text
+                except Exception as audio_error:
 
-                st.markdown(answer)
+                    st.warning(f"Voice generation failed: {audio_error}")
 
-                st.session_state.messages.append({
-                    "role": "assistant",
-                    "content": answer
-                })
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": answer,
+                "audio": audio_bytes
+            })
 
-            except Exception as error:
 
-                st.error(
-                    f"Unable to connect with backend: {error}"
-                )
+            st.rerun()
+
+        else:
+            st.warning("No speech detected. Please try again.")
+
+    except Exception as error:
+
+        st.error(f"Message processing failed: {error}")

@@ -66,3 +66,42 @@ def send_message(question, session_id, access_token, history=None):
     response.raise_for_status()
 
     return response.json()
+
+
+
+def transcribe_audio(audio_bytes, access_token):
+    response = requests.post(
+        f"{API_URL}/api/voice/transcribe",
+        files={
+            "file": (
+                "recording.wav",
+                audio_bytes,
+                "audio/wav"
+            )
+        },
+        headers={
+            "Authorization": f"Bearer {access_token}"
+        },
+        timeout=120
+    )
+
+    response.raise_for_status()
+
+    return response.json()
+
+
+
+def generate_speech(text, access_token):
+    response = requests.post(
+        f"{API_URL}/api/voice/speak",
+        params={"text": text},
+        headers={
+            "Authorization": f"Bearer {access_token}"
+        },
+        timeout=120
+    )
+
+    response.raise_for_status()
+
+    return response.content
+

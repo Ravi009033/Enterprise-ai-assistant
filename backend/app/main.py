@@ -6,6 +6,8 @@ from backend.app.api.documents import router as documents_router
 from backend.app.api.hr import router as hr_router
 from backend.app.api.auth import router as auth_router
 from backend.app.api.employee import router as employee_router
+from backend.app.api.voice import router as voice_router
+from backend.app.api.websocket import router as websocket_router
 
 app = FastAPI(
     title="Enterprise AI Assistant",
@@ -20,6 +22,8 @@ app.include_router(chat_router)
 app.include_router(documents_router)
 app.include_router(hr_router)
 app.include_router(employee_router)
+app.include_router(voice_router)
+app.include_router(websocket_router)
 
 @app.get("/")
 async def root():
