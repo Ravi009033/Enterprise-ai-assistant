@@ -3,10 +3,13 @@ from backend.app.core.llm import get_llm
 from backend.app.rag.query_rewriter import rewrite_query
 from backend.app.rag.retrieval import retrieve_relevant_documents
 from backend.app.services.employee_service import get_leave_balance
-
+from backend.app.services.leave_service import apply_for_leave
+from typing import Literal
+from pydantic import BaseModel, Field
 
 
 def router_node(state: dict) -> dict:
+    
     """
     Classifies the user's question into:
     rag, general, or tool.
@@ -14,6 +17,12 @@ def router_node(state: dict) -> dict:
 
     question = state["question"]
 
+    # If a leave request is awaiting confirmation,
+        # send the next message directly to the tool node.
+    if state.get("pending_leave"):
+        print("Pending leave confirmation detected.")
+        return {"route": "tool"}
+    
     prompt = f"""
 You are an intelligent enterprise assistant router.
 
@@ -200,6 +209,7 @@ Question:
     }
 
 
+
 def tool_node(state: dict) -> dict:
     employee_id = state.get("employee_id")
 
@@ -209,27 +219,190 @@ def tool_node(state: dict) -> dict:
             "sources": [],
             "status": "identity_not_configured",
         }
+    
+    pending_leave = state.get("pending_leave")
+
+    if pending_leave:
+        confirmation = state.get("confirmation", "unknown")
+
+        # User confirms the leave request.
+        if confirmation == "yes":
+            try:
+                result = apply_for_leave(
+                    employee_id=employee_id,
+                    days=pending_leave["days"],
+                    reason=pending_leave["reason"],
+                    idempotency_key=state["session_id"],
+                )
+
+                return {
+                    "answer": (
+                        "Leave request submitted successfully.\n"
+                        f"Request ID: {result['request_id']}\n"
+                        f"Days requested: {result['days']}\n"
+                        f"Status: {result['status']}"
+                    ),
+                    "pending_leave": {},
+                    "sources": [],
+                    "status": "success",
+                }
+
+            except ValueError as error:
+                return {
+                    "answer": str(error),
+                    "pending_leave": {},
+                    "sources": [],
+                    "status": "tool_error",
+                }
+
+            except Exception as error:
+                print("LEAVE SUBMISSION ERROR:", repr(error))
+
+                return {
+                    "answer": "Unable to submit your leave request.",
+                    "pending_leave": pending_leave,
+                    "sources": [],
+                    "status": "tool_error",
+                }
+
+        # User rejects the leave request.
+        elif confirmation == "no":
+            return {
+                "answer": "Your leave request has been cancelled.",
+                "pending_leave": {},
+                "sources": [],
+                "status": "cancelled",
+            }
+
+        # User has not given a clear confirmation.
+        else:
+            return {
+                "answer": (
+                    "Your leave request is still pending confirmation.\n"
+                    "Please reply YES to submit or NO to cancel."
+                ),
+                "pending_leave": pending_leave,
+                "sources": [],
+                "status": "awaiting_confirmation",
+            }
+        
+    try:
+        details = extract_leave_details(state["question"])
+
+        action = details["action"]
+
+        if action == "check_balance":
+            leave_data = get_leave_balance(employee_id)
+
+            answer = (
+                f"Hello {leave_data['employee_name']}! "
+                f"Your remaining leave balance is "
+                f"{leave_data['remaining_leaves']} days."
+            )
+
+            return {
+                "answer": answer,
+                "sources": [],
+                "status": "success",
+            }
+
+        
+        if action == "apply_leave":
+            days = details.get("days")
+            reason = details.get("reason")
+
+            if days is None or reason is None:
+                return {
+                    "answer": (
+                        "Please provide both the number of leave days "
+                        "and the reason for your leave."
+                    ),
+                    "sources": [],
+                    "status": "missing_leave_details",
+                }
+
+            # Do not submit until the user confirms.
+            return {
+                "answer": (
+                    f"You are requesting {days} days of leave "
+                    f"for: {reason}.\n"
+                    "Would you like me to submit this request? "
+                    "Please reply YES or NO."
+                ),
+                "pending_leave": {
+                    "days": days,
+                    "reason": reason,
+                },
+                "sources": [],
+                "status": "awaiting_confirmation",
+            }
+
+    except ValueError as error:
+        return {
+            "answer": str(error),
+            "sources": [],
+            "status": "tool_error",
+        }
+
+    except Exception as error:
+        print("EMPLOYEE TOOL ERROR:", repr(error))
+
+        return {
+            "answer": "Unable to process your employee request.",
+            "sources": [],
+            "status": "tool_error",
+        }
+
+
+
+class LeaveDetails(BaseModel):
+    action: Literal["apply_leave", "check_balance"] = Field(
+        description="The employee operation requested"
+    )
+
+    days: int | None = Field(
+        default=None,
+        ge=1,
+        description="Number of leave days requested, or null"
+    )
+
+    reason: str | None = Field(
+        default=None,
+        description="Reason for leave, or null"
+    )
+
+
+
+
+def extract_leave_details(question: str) -> dict:
+
+    prompt = f"""
+Identify the employee's requested operation.
+
+Rules:
+1. Use apply_leave when the employee wants to submit a leave request.
+2. Use check_balance when the employee asks about leave balance.
+3. Extract the number of leave days if provided.
+4. Extract the reason if provided.
+5. Do not invent missing information.
+6. Return the structured fields according to the schema.
+
+Employee request:
+{question}
+"""
 
     try:
-        leave_data = get_leave_balance(employee_id)
-
-        answer = (
-            f"Hello {leave_data['employee_name']}! "
-            f"Here is your leave balance:\n"
-            f"- Total leaves: {leave_data['total_leaves']}\n"
-            f"- Used leaves: {leave_data['used_leaves']}\n"
-            f"- Remaining leaves: {leave_data['remaining_leaves']}"
+        structured_llm = get_llm().with_structured_output(
+            LeaveDetails,
+            method="json_schema",
         )
 
-        return {
-            "answer": answer,
-            "sources": [],
-            "status": "success",
-        }
+        details = structured_llm.invoke(prompt)
 
-    except ValueError:
-        return {
-            "answer": "Unable to find your employee record.",
-            "sources": [],
-            "status": "employee_not_found",
-        }
+        return details.model_dump()
+
+    except Exception as error:
+        print("LEAVE EXTRACTION ERROR:", repr(error))
+        raise ValueError(
+            "Unable to understand the leave request. Please try again."
+        ) from error

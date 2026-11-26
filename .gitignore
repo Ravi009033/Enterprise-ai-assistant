@@ -69,3 +69,4 @@ Thumbs.db
 
 backend/chroma_db/
 backend/data/documents/
+backend/enterprise.db
