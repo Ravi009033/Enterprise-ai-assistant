@@ -1,7 +1,10 @@
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from backend.app.core.dependencies import get_user_from_token
-from backend.app.services.speech_service import live_transcription_session
+from backend.app.services.speech_service import (
+    live_transcription_session,
+    text_to_speech,
+)
 from backend.app.services.chat_service import process_chat
 import asyncio
 import uuid
@@ -31,53 +34,79 @@ async def voice_websocket(websocket: WebSocket):
     session_id = str(uuid.uuid4())
     conversation_history = []
     background_tasks = set()
-    chat_lock = asyncio.Lock()
+    latest_request_id = 0
     transcript_received_event = asyncio.Event()
 
 
     
     async def handle_final_transcript(transcript):
 
+        nonlocal latest_request_id
+
         current_task = asyncio.current_task()
         background_tasks.add(current_task)
+
+        # Assign a unique ID to every new question
+        latest_request_id += 1
+        request_id = latest_request_id
+
         transcript_received_event.set()
 
         try:
-            async with chat_lock:
+            await websocket.send_json({
+                "type": "thinking",
+                "message": "Processing your request..."
+            })
 
-                await websocket.send_json({
-                    "type": "thinking",
-                    "message": "Processing your request..."
-                })
+            # Generate AI response
+            result = await asyncio.to_thread(
+                process_chat,
+                question=transcript,
+                session_id=session_id,
+                history=conversation_history[-10:],
+                employee_id=current_user.get("employee_id") or "",
+                user_id=current_user["user_id"],
+            )
 
-                result = await asyncio.to_thread(
-                    process_chat,
-                    question=transcript,
-                    session_id=session_id,
-                    history=conversation_history[-10:],
-                    employee_id=current_user.get("employee_id") or "",
-                    user_id=current_user["user_id"],
-                )
+            # Ignore old responses
+            if request_id != latest_request_id:
+                print("Ignoring outdated AI response.")
+                return
 
-                answer = result["answer"]
+            answer = result["answer"]
 
-                conversation_history.append({
-                    "role": "user",
-                    "content": transcript
-                })
+            # Generate speech only for the latest request
+            audio_bytes = await asyncio.to_thread(
+                text_to_speech,
+                answer
+            )
 
-                conversation_history.append({
-                    "role": "assistant",
-                    "content": answer
-                })
+            # Check again because a newer question may have arrived
+            if request_id != latest_request_id:
+                print("Ignoring outdated audio response.")
+                return
 
-                await websocket.send_json({
-                    "type": "ai_response",
-                    "transcript": transcript,
-                    "answer": answer,
-                    "sources": result.get("sources", []),
-                    "status": result.get("status")
-                })
+            conversation_history.append({
+                "role": "user",
+                "content": transcript
+            })
+
+            conversation_history.append({
+                "role": "assistant",
+                "content": answer
+            })
+
+            await websocket.send_json({
+                "type": "ai_response",
+                "transcript": transcript,
+                "answer": answer,
+                "sources": result.get("sources", []),
+                "status": result.get("status"),
+                "audio_available": bool(audio_bytes)
+            })
+
+            if audio_bytes:
+                await websocket.send_bytes(audio_bytes)
 
         except WebSocketDisconnect:
             print("Browser disconnected during AI response.")

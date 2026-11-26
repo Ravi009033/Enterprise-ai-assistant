@@ -62,15 +62,20 @@ def render_live_voice_component(access_token):
         <h4>🤖 AI Assistant Response</h4>
         <div id="aiResponse"
            style = "
+                display: block;
+                box-sizing: border-box;
                 white-space: pre-wrap;
                 padding: 18px;
                 background: #f0f2f6;
                 border-radius: 10px;
                 font-size: 18px;
                 line-height: 1.7;
-                min-height: 160px;
-                color: #1f2937;
+                height: 300px;
+                overflow-y: scroll;
+                overflow-x: hidden;
+                scrollbar-width: auto;
                 overflow-wrap: anywhere;
+                color: #1f2937;
                 margin-top: 12px;
             ">
         </div>
@@ -90,6 +95,7 @@ def render_live_voice_component(access_token):
     let mediaStream = null;
     let processor = null;
     let source = null;
+    let currentAudio = null;
 
     startBtn.onclick = async () => {{
 
@@ -125,6 +131,25 @@ def render_live_voice_component(access_token):
                     processor.connect(audioContext.destination);
 
                     processor.onaudioprocess = (event) => {{
+                    
+                        // Stop previous AI audio when user starts speaking
+                        if (currentAudio && !currentAudio.paused) {{
+                            const input = event.inputBuffer.getChannelData(0);
+
+                            let volume = 0;
+
+                            for (let i = 0; i < input.length; i++) {{
+                                volume += input[i] * input[i];
+                            }}
+
+                            const rms = Math.sqrt(volume / input.length);
+
+                            if (rms > 0.025) {{
+                                currentAudio.pause();
+                                currentAudio.currentTime = 0;
+                                currentAudio = null;
+                            }}
+                        }}
 
                         if (socket.readyState !== WebSocket.OPEN) return;
 
@@ -156,6 +181,38 @@ def render_live_voice_component(access_token):
             }};
 
             socket.onmessage = (event) => {{
+            
+                // Handle incoming MP3 audio
+                if (event.data instanceof Blob) {{
+                
+                    // Stop previous AI audio if still playing
+                    if (currentAudio) {{
+                        currentAudio.pause();
+                        currentAudio.currentTime = 0;
+
+                        if (currentAudio.src.startsWith("blob:")) {{
+                            URL.revokeObjectURL(currentAudio.src);
+                        }}
+
+                        currentAudio = null;
+                    }}
+
+                    const audioUrl = URL.createObjectURL(event.data);
+                    const audio = new Audio(audioUrl);
+
+                    currentAudio = audio;
+
+                    audio.onended = () => {{
+                        URL.revokeObjectURL(audioUrl);
+                    }};
+
+                    audio.play().catch((error) => {{
+                        console.error("Audio playback error:", error);
+                        status.textContent = "Audio playback failed: " + error.message;
+                    }});
+
+                    return;
+                }}
 
                 const data = JSON.parse(event.data);
 
@@ -240,7 +297,7 @@ def render_live_voice_component(access_token):
     </script>
     """
 
-    components.html(html_code, height=450)
+    components.html(html_code, height=650)
 
 
 
